@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter } from 'next/navigation';
-import { Bell, RefreshCw, Wifi } from 'lucide-react';
+import { RefreshCw, Wifi } from 'lucide-react';
 import { useDeviceStatus } from '@/lib/hooks';
 import FirebaseStatus from '@/components/ui/FirebaseStatus';
 import { GoldLightningEmblem } from '@/components/brand/IntelliWattLogo';
@@ -114,12 +114,6 @@ export default function Topbar() {
             className={`topbar-refresh-icon ${refreshing ? 'is-refreshing' : ''}`}
           />
           {refreshedNotice && <span className="topbar-refresh-pulse-ring" aria-hidden="true" />}
-        </button>
-
-        {/* Notifications */}
-        <button className="topbar-icon-btn" title="Notifications" aria-label="Notifications">
-          <Bell size={16} />
-          <span className="notification-badge" aria-label="3 notifications">3</span>
         </button>
       </div>
     </header>
