@@ -19,6 +19,7 @@ import { DEFAULT_DEVICE_ID } from '@/lib/firebase';
 // ─── Smart Home Relay Definitions ─────────────────────────────────────────────
 interface SmartApplianceMeta {
   id:          string;
+  channel:     string;
   name:        string;
   room:        string;
   watts:       number;
@@ -28,56 +29,65 @@ interface SmartApplianceMeta {
   description: string;
   category:    'climate' | 'heavy' | 'outdoor' | 'lighting';
   schedule:    string;
+  disabled?:   boolean;
 }
 
 const APPLIANCES: SmartApplianceMeta[] = [
   {
-    id:          'relay1',
-    name:        'Living Room AC Unit',
-    room:        'Living Room · Climate',
-    watts:       1800,
-    icon:        Wind,
-    color:       '#D4AF37',
-    glowColor:   'rgba(212, 175, 55, 0.4)',
-    description: 'Inverter split AC compressor. High-draw cooling load with surge protection.',
-    category:    'climate',
-    schedule:    'Auto OFF at 23:00',
-  },
-  {
     id:          'relay2',
-    name:        'Smart Geyser Heater',
-    room:        'Master Bath · Utility',
-    watts:       2000,
-    icon:        Flame,
+    channel:     'CH1',
+    name:        'Test Load Bulb',
+    room:        'Prototype Bench · Load Circuit',
+    watts:       100,
+    icon:        Lightbulb,
     color:       '#F5D76E',
     glowColor:   'rgba(245, 215, 110, 0.4)',
-    description: 'High-capacity thermal water heater. Thermostat controlled 16A circuit.',
-    category:    'heavy',
-    schedule:    'Manual / Eco timer',
+    description: 'Hardware test load bulb circuit with live switching and real-time power monitoring.',
+    category:    'lighting',
+    schedule:    'Active / Manual Control',
+    disabled:    false,
+  },
+  {
+    id:          'relay1',
+    channel:     'CH2',
+    name:        'Disabled',
+    room:        'Auxiliary · Unassigned',
+    watts:       0,
+    icon:        Power,
+    color:       '#666666',
+    glowColor:   'rgba(255, 255, 255, 0.05)',
+    description: 'This relay channel is currently disabled and disconnected from hardware loads.',
+    category:    'climate',
+    schedule:    'Channel Inactive',
+    disabled:    true,
   },
   {
     id:          'relay3',
-    name:        'Garden Irrigation Pump',
-    room:        'Outdoor & Lawn · Water',
-    watts:       750,
-    icon:        Droplets,
-    color:       '#FFFFFF',
-    glowColor:   'rgba(255, 255, 255, 0.3)',
-    description: 'Submersible water pump for lawn sprinklers. Automated soil-moisture sync.',
+    channel:     'CH3',
+    name:        'Disabled',
+    room:        'Auxiliary · Unassigned',
+    watts:       0,
+    icon:        Power,
+    color:       '#666666',
+    glowColor:   'rgba(255, 255, 255, 0.05)',
+    description: 'This relay channel is currently disabled and disconnected from hardware loads.',
     category:    'outdoor',
-    schedule:    'Daily 06:30 – 07:00',
+    schedule:    'Channel Inactive',
+    disabled:    true,
   },
   {
     id:          'relay4',
-    name:        'Ambient LED Strip Grid',
-    room:        'Entire Home · Lighting',
-    watts:       320,
-    icon:        Lightbulb,
-    color:       '#8A6A16',
-    glowColor:   'rgba(138, 106, 22, 0.4)',
-    description: 'Architectural ceiling cove lighting and hall accents. Low-power illumination.',
+    channel:     'CH4',
+    name:        'Disabled',
+    room:        'Auxiliary · Unassigned',
+    watts:       0,
+    icon:        Power,
+    color:       '#666666',
+    glowColor:   'rgba(255, 255, 255, 0.05)',
+    description: 'This relay channel is currently disabled and disconnected from hardware loads.',
     category:    'lighting',
-    schedule:    'Dusk to Midnight',
+    schedule:    'Channel Inactive',
+    disabled:    true,
   },
 ];
 
@@ -113,11 +123,14 @@ export default function RelayControlPage() {
     action: async () => {},
   });
 
-  // Calculate live smart home metrics
-  const activeCount = relays.filter(r => r.state).length;
+  // Calculate live smart home metrics (only counting enabled channels)
+  const activeCount = relays.filter(r => {
+    const meta = APPLIANCES.find(a => a.id === r.id);
+    return r.state && !meta?.disabled;
+  }).length;
   const totalConfiguredLoad = relays.reduce((sum, r) => {
     const meta = APPLIANCES.find(a => a.id === r.id);
-    return sum + (r.state ? (meta?.watts ?? 0) : 0);
+    return sum + (r.state && !meta?.disabled ? (meta?.watts ?? 0) : 0);
   }, 0);
 
   // ─── Add Toast Notification ─────────────────────────────────────────────────
@@ -145,7 +158,7 @@ export default function RelayControlPage() {
   const handleToggleSwitch = async (relayId: string, customTargetState?: boolean) => {
     const relay = relays.find(r => r.id === relayId);
     const meta  = APPLIANCES.find(a => a.id === relayId);
-    if (!relay || !meta) return;
+    if (!relay || !meta || meta.disabled) return;
 
     const nextState = customTargetState !== undefined ? customTargetState : !relay.state;
 
@@ -663,7 +676,7 @@ export default function RelayControlPage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '1.5rem' }}>
           {APPLIANCES.map((appliance, idx) => {
             const currentRelay = relays.find(r => r.id === appliance.id);
-            const isOn = Boolean(currentRelay?.state);
+            const isOn = !appliance.disabled && Boolean(currentRelay?.state);
             const isUpdating = Boolean(updatingRelays[appliance.id]);
             const Icon = appliance.icon;
             const currentAmps = (appliance.watts / 230).toFixed(1);
@@ -671,45 +684,79 @@ export default function RelayControlPage() {
             return (
               <article
                 key={appliance.id}
-                className={`relay-card-smart ${isOn ? 'is-on' : 'is-off'} animate-fade-up stagger-${idx + 5}`}
-                aria-label={`${appliance.name} Switch — Currently ${isOn ? 'ON' : 'OFF'}`}
+                className={`relay-card-smart ${appliance.disabled ? 'is-disabled' : isOn ? 'is-on' : 'is-off'} animate-fade-up stagger-${idx + 5}`}
+                aria-label={`${appliance.name} Switch (${appliance.channel}) — ${appliance.disabled ? 'Disabled' : isOn ? 'ON' : 'OFF'}`}
+                style={appliance.disabled ? {
+                  opacity: 0.72,
+                  borderColor: 'rgba(255, 255, 255, 0.08)',
+                  background: 'rgba(15, 23, 42, 0.45)',
+                } : undefined}
               >
                 {/* Card Top: Avatar, Room Info & Smooth Switch */}
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                     {/* Glowing Icon Halo */}
-                    <div className={`appliance-icon-halo ${isOn ? 'active' : 'inactive'}`}>
+                    <div className={`appliance-icon-halo ${!appliance.disabled && isOn ? 'active' : 'inactive'}`}>
                       <Icon
                         size={24}
-                        color={isOn ? appliance.color : 'var(--text-muted)'}
+                        color={!appliance.disabled && isOn ? appliance.color : 'var(--text-muted)'}
                         style={{
                           transition: 'all 0.35s ease',
-                          filter: isOn ? `drop-shadow(0 0 8px ${appliance.glowColor})` : 'none',
+                          filter: !appliance.disabled && isOn ? `drop-shadow(0 0 8px ${appliance.glowColor})` : 'none',
                         }}
                       />
                     </div>
 
                     <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <span style={{
                           fontFamily: 'Manrope, sans-serif',
                           fontSize: '0.72rem',
-                          color: 'var(--gold-bright)',
+                          color: appliance.disabled ? 'var(--text-muted)' : 'var(--gold-bright)',
                           fontWeight: 700,
                           textTransform: 'uppercase',
                           letterSpacing: '0.8px',
                         }}>
-                          CH{idx + 1}
+                          {appliance.channel}
                         </span>
                         <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>•</span>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 500 }}>
                           {appliance.room}
                         </span>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>•</span>
+                        {appliance.disabled ? (
+                          <span
+                            className="badge"
+                            style={{
+                              fontSize: '0.65rem',
+                              padding: '1px 7px',
+                              background: 'rgba(255, 255, 255, 0.06)',
+                              color: 'var(--text-muted)',
+                              border: '1px solid rgba(255, 255, 255, 0.1)',
+                            }}
+                          >
+                            Inactive
+                          </span>
+                        ) : (
+                          <span
+                            className="badge badge-green"
+                            style={{
+                              fontSize: '0.65rem',
+                              padding: '1px 7px',
+                              background: 'rgba(0, 255, 136, 0.12)',
+                              color: 'var(--accent-green)',
+                              border: '1px solid rgba(0, 255, 136, 0.25)',
+                              fontWeight: 700,
+                            }}
+                          >
+                            Active
+                          </span>
+                        )}
                       </div>
                       <h3 style={{
                         fontSize: '1.05rem',
                         fontWeight: 800,
-                        color: isOn ? 'var(--text-primary)' : 'var(--text-secondary)',
+                        color: appliance.disabled ? 'var(--text-muted)' : (isOn ? 'var(--text-primary)' : 'var(--text-secondary)'),
                         marginTop: 2,
                         transition: 'color 0.3s ease',
                       }}>
@@ -723,18 +770,26 @@ export default function RelayControlPage() {
                     <label
                       className="smart-home-switch"
                       aria-label={`Toggle ${appliance.name}`}
-                      style={{ opacity: isUpdating ? 0.7 : 1 }}
+                      style={{
+                        opacity: appliance.disabled ? 0.35 : (isUpdating ? 0.7 : 1),
+                        cursor: appliance.disabled ? 'not-allowed' : 'pointer',
+                      }}
                     >
                       <input
                         type="checkbox"
                         checked={isOn}
-                        disabled={isUpdating}
-                        onChange={() => handleToggleSwitch(appliance.id)}
+                        disabled={appliance.disabled || isUpdating}
+                        onChange={() => {
+                          if (!appliance.disabled) {
+                            handleToggleSwitch(appliance.id);
+                          }
+                        }}
                         role="switch"
                         aria-checked={isOn}
+                        style={{ cursor: appliance.disabled ? 'not-allowed' : 'pointer' }}
                       />
-                      <span className="smart-switch-track">
-                        <span className="smart-switch-thumb" />
+                      <span className="smart-switch-track" style={{ cursor: appliance.disabled ? 'not-allowed' : 'pointer' }}>
+                        <span className="smart-switch-thumb" style={{ cursor: appliance.disabled ? 'not-allowed' : 'pointer' }} />
                       </span>
                     </label>
 
@@ -742,13 +797,15 @@ export default function RelayControlPage() {
                       fontSize: '0.65rem',
                       fontFamily: 'Manrope, sans-serif',
                       fontWeight: 700,
-                      color: isUpdating
+                      color: appliance.disabled
+                        ? 'var(--text-muted)'
+                        : isUpdating
                         ? 'var(--gold-luxury)'
                         : (isOn ? 'var(--accent-green)' : 'var(--text-muted)'),
                       letterSpacing: '0.8px',
                       transition: 'color 0.3s ease',
                     }}>
-                      {isUpdating ? 'SYNCING…' : (isOn ? 'POWERED ON' : 'OFFLINE')}
+                      {appliance.disabled ? 'DISABLED' : isUpdating ? 'SYNCING…' : (isOn ? 'POWERED ON' : 'OFFLINE')}
                     </span>
                   </div>
                 </div>
@@ -761,8 +818,12 @@ export default function RelayControlPage() {
                     justifyContent: 'space-between',
                     padding: '10px 14px',
                     borderRadius: 10,
-                    background: isOn ? 'rgba(0, 255, 136, 0.08)' : 'rgba(255, 255, 255, 0.03)',
-                    border: `1px solid ${isOn ? 'rgba(0, 255, 136, 0.22)' : 'rgba(255, 255, 255, 0.06)'}`,
+                    background: appliance.disabled
+                      ? 'rgba(255, 255, 255, 0.02)'
+                      : (isOn ? 'rgba(0, 255, 136, 0.08)' : 'rgba(255, 255, 255, 0.03)'),
+                    border: `1px solid ${appliance.disabled
+                      ? 'rgba(255, 255, 255, 0.05)'
+                      : (isOn ? 'rgba(0, 255, 136, 0.22)' : 'rgba(255, 255, 255, 0.06)')}`,
                     marginBottom: '1rem',
                     transition: 'all 0.35s ease',
                   }}
@@ -773,18 +834,24 @@ export default function RelayControlPage() {
                         width: 8,
                         height: 8,
                         borderRadius: '50%',
-                        background: isOn ? 'var(--accent-green)' : 'var(--accent-red)',
-                        boxShadow: isOn ? '0 0 8px rgba(0, 255, 136, 0.8)' : 'none',
-                        animation: isOn ? 'pulse-dot 1.8s infinite' : 'none',
+                        background: appliance.disabled
+                          ? 'rgba(255, 255, 255, 0.25)'
+                          : (isOn ? 'var(--accent-green)' : 'var(--accent-red)'),
+                        boxShadow: !appliance.disabled && isOn ? '0 0 8px rgba(0, 255, 136, 0.8)' : 'none',
+                        animation: !appliance.disabled && isOn ? 'pulse-dot 1.8s infinite' : 'none',
                       }}
                     />
                     <span style={{
                       fontSize: '0.825rem',
                       fontWeight: 700,
-                      color: isOn ? 'var(--accent-green)' : 'var(--text-muted)',
+                      color: appliance.disabled
+                        ? 'var(--text-muted)'
+                        : (isOn ? 'var(--accent-green)' : 'var(--text-muted)'),
                       letterSpacing: '0.2px',
                     }}>
-                      {isOn ? 'Energized & Delivering Power' : 'De-energized (Standby)'}
+                      {appliance.disabled
+                        ? 'Channel Inactive (Disabled)'
+                        : (isOn ? 'Active · Energized & Delivering Power' : 'Active · Standby (OFF)')}
                     </span>
                   </div>
 
@@ -792,9 +859,9 @@ export default function RelayControlPage() {
                     fontSize: '0.75rem',
                     fontFamily: 'Manrope, sans-serif',
                     fontWeight: 600,
-                    color: isOn ? appliance.color : 'var(--text-muted)',
+                    color: !appliance.disabled && isOn ? appliance.color : 'var(--text-muted)',
                   }}>
-                    {isOn ? `${appliance.watts} W` : '0 W'}
+                    {!appliance.disabled && isOn ? `${appliance.watts} W` : '0 W'}
                   </span>
                 </div>
 
@@ -827,9 +894,9 @@ export default function RelayControlPage() {
                       fontSize: '0.85rem',
                       fontWeight: 600,
                       fontFamily: 'Manrope, sans-serif',
-                      color: isOn ? 'var(--text-primary)' : 'var(--text-muted)',
+                      color: !appliance.disabled && isOn ? 'var(--text-primary)' : 'var(--text-muted)',
                     }}>
-                      {isOn ? `${currentAmps} A` : '0.0 A'}
+                      {!appliance.disabled && isOn ? `${currentAmps} A` : '0.0 A'}
                     </div>
                   </div>
 
@@ -841,9 +908,9 @@ export default function RelayControlPage() {
                       fontSize: '0.85rem',
                       fontWeight: 600,
                       fontFamily: 'Manrope, sans-serif',
-                      color: isOn ? 'var(--accent-green)' : 'var(--text-muted)',
+                      color: !appliance.disabled && isOn ? 'var(--accent-green)' : 'var(--text-muted)',
                     }}>
-                      {isOn ? `₹${((appliance.watts * 24 / 1000) * 8.5).toFixed(1)}` : '₹0'}
+                      {!appliance.disabled && isOn ? `₹${((appliance.watts * 24 / 1000) * 8.5).toFixed(1)}` : '₹0'}
                     </div>
                   </div>
 
@@ -854,7 +921,7 @@ export default function RelayControlPage() {
                     <div style={{
                       fontSize: '0.7rem',
                       fontWeight: 600,
-                      color: 'var(--text-secondary)',
+                      color: appliance.disabled ? 'var(--text-muted)' : 'var(--text-secondary)',
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -877,8 +944,8 @@ export default function RelayControlPage() {
                     doc: relays/{appliance.id}
                   </span>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <ShieldCheck size={11} color="var(--accent-green)" />
-                    Protected 16A
+                    <ShieldCheck size={11} color={appliance.disabled ? 'var(--text-muted)' : 'var(--accent-green)'} />
+                    {appliance.disabled ? 'Channel Inactive' : 'Active 16A'}
                   </span>
                 </div>
               </article>
