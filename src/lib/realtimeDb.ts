@@ -33,6 +33,12 @@ export interface IntelliWattData {
 
   deviceStatus: string;
 
+  // Real-time ESP32 Heartbeat & Status
+  lastSeen?:            number | string;
+  prototypeOnline?:     boolean;
+  wifiConnected?:       boolean;
+  firebaseConnected?:   boolean;
+
   relay1:       boolean;
   relay2:       boolean;
   relay3?:      boolean;
@@ -86,6 +92,11 @@ export const DEFAULT_INTELLIWATT_DATA: IntelliWattData = {
   sdCard:       false,
 
   deviceStatus: 'Offline',
+
+  lastSeen:          undefined,
+  prototypeOnline:   false,
+  wifiConnected:     false,
+  firebaseConnected: false,
 
   relay1:       false,
   relay2:       false,
@@ -144,7 +155,21 @@ export function mapSnapshotToIntelliWattData(raw: unknown): IntelliWattData {
   const powerFactor = parseNum(sensor.PowerFactor ?? sensor.powerFactor ?? data.PowerFactor ?? data.powerFactor, 1.0);
 
   // System mappings
-  const wifiStatus = parseBool(system.WiFi ?? system.wifi ?? system.wifiStatus ?? data.WiFi ?? data.wifiStatus, false);
+  const rawLastSeen = system.lastSeen ?? data.lastSeen;
+  const lastSeen = typeof rawLastSeen === 'number' || typeof rawLastSeen === 'string' ? rawLastSeen : undefined;
+
+  const rawProto = system.prototypeOnline ?? system.prototype ?? data.prototypeOnline;
+  const prototypeOnline = rawProto !== undefined ? parseBool(rawProto, false) : undefined;
+
+  const rawWifi = system.wifiConnected ?? system.wifi ?? system.WiFi ?? system.wifiStatus ?? data.wifiConnected ?? data.wifiStatus;
+  const wifiConnected = rawWifi !== undefined ? parseBool(rawWifi, false) : undefined;
+
+  const rawFb = system.firebaseConnected ?? system.firebase ?? data.firebaseConnected;
+  const firebaseConnected = rawFb !== undefined ? parseBool(rawFb, false) : undefined;
+
+  const wifiStatus = wifiConnected !== undefined
+    ? wifiConnected
+    : parseBool(system.WiFi ?? system.wifi ?? system.wifiStatus ?? data.WiFi ?? data.wifiStatus, false);
   const monitoring = parseBool(system.Monitoring ?? system.monitoring, false);
   const warning = parseBool(system.Warning ?? system.warning, false);
   const sdCard = parseBool(system.SDCard ?? system.sdCard ?? system.sdcard, false);
@@ -187,6 +212,11 @@ export function mapSnapshotToIntelliWattData(raw: unknown): IntelliWattData {
     sdCard,
 
     deviceStatus,
+
+    lastSeen,
+    prototypeOnline,
+    wifiConnected,
+    firebaseConnected,
 
     relay1,
     relay2,
@@ -240,6 +270,63 @@ export function subscribeToIntelliWatt(
     };
   } catch (err) {
     console.warn('[RTDB] Failed to bind IntelliWatt listener:', err);
+    onError?.(err as Error);
+    return () => {};
+  }
+}
+
+// ─── Real-Time System Heartbeat Listener: IntelliWatt/System ──────────────────
+export interface SystemHeartbeatData {
+  lastSeen?:          number | string;
+  prototypeOnline?:   boolean;
+  wifiConnected?:     boolean;
+  firebaseConnected?: boolean;
+}
+
+export function subscribeToSystemHeartbeat(
+  onData:   (data: SystemHeartbeatData) => void,
+  onError?: (err: Error) => void,
+): () => void {
+  try {
+    const targetRef = ref(rtdb, 'IntelliWatt/System');
+
+    const listener = (snapshot: DataSnapshot) => {
+      try {
+        if (snapshot.exists()) {
+          const val = snapshot.val() as Record<string, unknown> | null;
+          if (val && typeof val === 'object') {
+            const rawLastSeen = val.lastSeen;
+            const lastSeen = typeof rawLastSeen === 'number' || typeof rawLastSeen === 'string' ? rawLastSeen : undefined;
+            const prototypeOnline = val.prototypeOnline !== undefined ? parseBool(val.prototypeOnline, false) : undefined;
+            const wifiConnected = (val.wifiConnected !== undefined ? parseBool(val.wifiConnected, false) : undefined)
+              ?? (val.WiFi !== undefined ? parseBool(val.WiFi, false) : undefined)
+              ?? (val.wifi !== undefined ? parseBool(val.wifi, false) : undefined);
+            const firebaseConnected = val.firebaseConnected !== undefined ? parseBool(val.firebaseConnected, false) : undefined;
+
+            onData({ lastSeen, prototypeOnline, wifiConnected, firebaseConnected });
+            return;
+          }
+        }
+        onData({});
+      } catch (err) {
+        console.warn('[RTDB] Error in SystemHeartbeat listener:', err);
+        onError?.(err as Error);
+      }
+    };
+
+    const errorListener = (error: Error) => {
+      console.warn('[RTDB] SystemHeartbeat listener error:', error.message);
+      onError?.(error);
+    };
+
+    const unsub = onValue(targetRef, listener, errorListener);
+
+    return () => {
+      unsub();
+      off(targetRef, 'value', listener);
+    };
+  } catch (err) {
+    console.warn('[RTDB] Failed to bind SystemHeartbeat listener:', err);
     onError?.(err as Error);
     return () => {};
   }

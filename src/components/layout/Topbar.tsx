@@ -74,7 +74,7 @@ export default function Topbar() {
         {/* Firebase Live Status */}
         <FirebaseStatus />
 
-        {/* Device Status */}
+        {/* Prototype Status */}
         <div
           className="topbar-status-pill"
           style={
@@ -82,10 +82,10 @@ export default function Topbar() {
               ? { background: '#171717', borderColor: 'rgba(212, 175, 55, 0.35)', color: 'var(--accent-green)' }
               : { background: '#171717', borderColor: 'rgba(255, 82, 82, 0.35)', color: 'var(--accent-red)' }
           }
-          title={`Device Status: ${online ? '🟢 Online' : '🔴 Offline'}`}
+          title={`Prototype Status: ${online ? '🟢 ON' : '🔴 OFF'}`}
         >
           <span className={`status-dot ${online ? '' : 'offline'}`} />
-          {online ? '🟢 Online' : '🔴 Offline'}
+          {online ? '🟢 Prototype ON' : '🔴 Prototype OFF'}
         </div>
 
         {/* WiFi Connection Status */}
@@ -99,7 +99,7 @@ export default function Topbar() {
           title={`WiFi: ${isWifiOnline ? 'Connected' : 'Disconnected'}`}
         >
           <Wifi size={12} color={isWifiOnline ? 'var(--gold-luxury)' : 'var(--accent-red)'} />
-          {isWifiOnline ? '🟢 Online (WiFi)' : '🔴 Offline (WiFi)'}
+          {isWifiOnline ? '🟢 Wi-Fi ON' : '🔴 Wi-Fi OFF'}
         </div>
 
         {/* Refresh */}

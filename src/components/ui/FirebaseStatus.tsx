@@ -81,8 +81,8 @@ export default function FirebaseStatus() {
   return (
     <div
       role="alert"
-      aria-label="Waiting for ESP32..."
-      title="Realtime Database — Waiting for ESP32..."
+      aria-label="Firebase OFF"
+      title="Firebase OFF — Waiting for ESP32 heartbeat"
       style={{
         display:      'flex',
         alignItems:   'center',
@@ -90,15 +90,24 @@ export default function FirebaseStatus() {
         padding:      '6px 13px',
         borderRadius: 20,
         background:   '#171717',
-        border:       '1px solid rgba(212, 175, 55, 0.35)',
+        border:       '1px solid rgba(255, 82, 82, 0.35)',
         fontSize:     '0.75rem',
-        color:        'var(--gold-bright)',
+        color:        'var(--accent-red)',
         fontWeight:   600,
         fontFamily:   'Manrope, sans-serif',
       }}
     >
-      <WifiOff size={12} color="var(--gold-luxury)" style={{ flexShrink: 0 }} />
-      Waiting for ESP32...
+      <span
+        style={{
+          width:        6,
+          height:       6,
+          borderRadius: '50%',
+          background:   'var(--accent-red)',
+          boxShadow:    '0 0 8px rgba(255, 82, 82, 0.7)',
+          flexShrink:   0,
+        }}
+      />
+      <span>Firebase OFF</span>
     </div>
   );
 }

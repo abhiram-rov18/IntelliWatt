@@ -15,6 +15,8 @@ import {
   subscribeToRelays,
   writeRelayState,
   subscribeToIntelliWatt,
+  subscribeToSystemHeartbeat,
+  type SystemHeartbeatData,
   updateIntelliWattRelay,
   updateAllIntelliWattRelays,
 } from './realtimeDb';
@@ -58,41 +60,183 @@ function resolveDeviceId(input?: unknown): string {
   return DEFAULT_DEVICE_ID;
 }
 
-// ─── useFirebaseConnection ─────────────────────────────────────────────────────
+// ─── Helper: parseTimestampMs ─────────────────────────────────────────────────
+export function parseTimestampMs(val: unknown): number | null {
+  if (val === undefined || val === null || val === '') return null;
+  if (typeof val === 'number') {
+    if (val > 1e11) return val; // Milliseconds (e.g. 1731428500000)
+    if (val > 1e8) return val * 1000; // Seconds (e.g. 1731428500)
+    return null; // Small counter / millis()
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    const num = Number(trimmed);
+    if (!isNaN(num)) {
+      if (num > 1e11) return num;
+      if (num > 1e8) return num * 1000;
+    }
+    const parsed = Date.parse(trimmed);
+    if (!isNaN(parsed)) return parsed;
+  }
+  return null;
+}
+
+export interface SystemHeartbeatState {
+  hasHeartbeat: boolean;
+  prototypeOnline: boolean;
+  wifiOnline: boolean;
+  firebaseOnline: boolean;
+  lastSeen: number | string | null;
+  rawWifiConnected: boolean;
+  rawFirebaseConnected: boolean;
+  rawPrototypeOnline: boolean;
+  isLoading: boolean;
+  timeSinceLastHeartbeatMs: number | null;
+}
+
 /**
- * Tracks whether the browser has an active connection to Firebase Realtime Database.
- * Returns true if connected, false if disconnected, or null while connecting.
+ * Subscribes in real time to the ESP32 heartbeat at IntelliWatt/System.
+ *
+ * Requirements:
+ * - If lastSeen heartbeat update is missing for > 5 seconds:
+ *     🔴 Prototype OFF
+ *     🔴 Wi-Fi OFF
+ *     🔴 Firebase OFF
+ * - If lastSeen heartbeat update is received within the last 5 seconds:
+ *     🟢 Prototype ON
+ *     wifiConnected == true -> 🟢 Wi-Fi ON, else 🔴 Wi-Fi OFF
+ *     firebaseConnected == true -> 🟢 Firebase Connected, else 🔴 Firebase Disconnected
  */
-export function useFirebaseConnection(): boolean | null {
-  const [isConnected, setIsConnected] = useState<boolean | null>(null);
+export function useSystemHeartbeat(): SystemHeartbeatState {
+  const [hasHeartbeat, setHasHeartbeat] = useState<boolean>(false);
+  const [lastSeen, setLastSeen] = useState<number | string | null>(null);
+  const [rawPrototypeOnline, setRawPrototypeOnline] = useState<boolean>(false);
+  const [rawWifiConnected, setRawWifiConnected] = useState<boolean>(false);
+  const [rawFirebaseConnected, setRawFirebaseConnected] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [timeSinceHeartbeatMs, setTimeSinceHeartbeatMs] = useState<number | null>(null);
+
+  const lastValidHeartbeatRef = useRef<number | null>(null);
+  const prevLastSeenRef = useRef<number | string | undefined>(undefined);
+  const isMountedRef = useRef<boolean>(false);
 
   useEffect(() => {
-    // 1. Listen to Realtime Database /intelliwatt
-    const unsubData = subscribeToIntelliWatt(
-      (data) => {
-        if (data !== null) {
-          setIsConnected(true);
-        }
-      },
-      () => {
-        setIsConnected(false);
-      }
-    );
+    isMountedRef.current = true;
+    setIsLoading(true);
 
-    // 2. Also listen to RTDB .info/connected
-    const unsubRtdb = subscribeToConnectionState((connected) => {
-      if (connected) {
-        setIsConnected(true);
+    const handleData = (data: {
+      lastSeen?: number | string;
+      prototypeOnline?: boolean;
+      wifiConnected?: boolean;
+      firebaseConnected?: boolean;
+    }) => {
+      if (!isMountedRef.current) return;
+      setIsLoading(false);
+
+      if (data.prototypeOnline !== undefined) {
+        setRawPrototypeOnline(Boolean(data.prototypeOnline));
       }
+      if (data.wifiConnected !== undefined) {
+        setRawWifiConnected(Boolean(data.wifiConnected));
+      }
+      if (data.firebaseConnected !== undefined) {
+        setRawFirebaseConnected(Boolean(data.firebaseConnected));
+      }
+
+      const rawLastSeen = data.lastSeen;
+      if (rawLastSeen !== undefined && rawLastSeen !== null) {
+        setLastSeen(rawLastSeen);
+        const parsedMs = parseTimestampMs(rawLastSeen);
+        const now = Date.now();
+
+        // Check if value of lastSeen changed from previous value
+        const valueChanged = prevLastSeenRef.current !== undefined && prevLastSeenRef.current !== rawLastSeen;
+
+        if (valueChanged) {
+          // If value of IntelliWatt/System/lastSeen changed, heartbeat is actively pulsing
+          lastValidHeartbeatRef.current = now;
+          setHasHeartbeat(true);
+        } else if (prevLastSeenRef.current === undefined) {
+          // Initial mount: verify if lastSeen timestamp was generated within last 5 seconds
+          if (parsedMs !== null) {
+            const diff = now - parsedMs;
+            if (diff >= -5000 && diff <= 5000) {
+              lastValidHeartbeatRef.current = now;
+              setHasHeartbeat(true);
+            }
+          }
+        }
+        prevLastSeenRef.current = rawLastSeen;
+      }
+    };
+
+    // 1. Subscribe directly to IntelliWatt/System
+    const unsubHeartbeat = subscribeToSystemHeartbeat(handleData);
+
+    // 2. Also subscribe to full IntelliWatt tree in case ESP32 updates parent path
+    const unsubIntelliWatt = subscribeToIntelliWatt((fullData) => {
+      handleData({
+        lastSeen: fullData.lastSeen,
+        prototypeOnline: fullData.prototypeOnline,
+        wifiConnected: fullData.wifiConnected,
+        firebaseConnected: fullData.firebaseConnected,
+      });
     });
 
+    // 3. Heartbeat expiry tick: checks every 300ms if 5000ms has elapsed
+    const ticker = setInterval(() => {
+      if (!isMountedRef.current) return;
+      const now = Date.now();
+      const lastValid = lastValidHeartbeatRef.current;
+      if (lastValid === null) {
+        setHasHeartbeat(false);
+        setTimeSinceHeartbeatMs(null);
+      } else {
+        const elapsed = now - lastValid;
+        setTimeSinceHeartbeatMs(elapsed);
+        if (elapsed > 5000) {
+          setHasHeartbeat(false);
+        } else {
+          setHasHeartbeat(true);
+        }
+      }
+    }, 300);
+
     return () => {
-      unsubData();
-      unsubRtdb();
+      isMountedRef.current = false;
+      unsubHeartbeat();
+      unsubIntelliWatt();
+      clearInterval(ticker);
     };
   }, []);
 
-  return isConnected;
+  const prototypeOnline = hasHeartbeat;
+  const wifiOnline = hasHeartbeat ? (rawWifiConnected === true) : false;
+  const firebaseOnline = hasHeartbeat ? (rawFirebaseConnected === true) : false;
+
+  return {
+    hasHeartbeat,
+    prototypeOnline,
+    wifiOnline,
+    firebaseOnline,
+    lastSeen,
+    rawWifiConnected,
+    rawFirebaseConnected,
+    rawPrototypeOnline,
+    isLoading,
+    timeSinceLastHeartbeatMs: timeSinceHeartbeatMs,
+  };
+}
+
+// ─── useFirebaseConnection ─────────────────────────────────────────────────────
+/**
+ * Tracks whether the browser has an active connection to Firebase Realtime Database
+ * and whether the ESP32 heartbeat confirms firebaseConnected within 5 seconds.
+ */
+export function useFirebaseConnection(): boolean | null {
+  const heartbeat = useSystemHeartbeat();
+  if (heartbeat.isLoading) return null;
+  return heartbeat.firebaseOnline;
 }
 
 // ─── useSensorData ─────────────────────────────────────────────────────────────
@@ -245,124 +389,44 @@ export function useSensorData(deviceArg?: unknown) {
  */
 export function useDeviceStatus(deviceArg?: unknown) {
   const deviceId = resolveDeviceId(deviceArg);
-  const [status,       setStatus]       = useState<DeviceStatus>(SKELETON_STATUS);
-  const [isLoading,    setIsLoading]    = useState<boolean>(true);
-  const [error,        setError]        = useState<string | null>(null);
-  const [wifiStatus,   setWifiStatus]   = useState<boolean | string | null>(null);
-  const [deviceStatus, setDeviceStatus] = useState<boolean | string | null>(null);
+  const heartbeat = useSystemHeartbeat();
+  const [status, setStatus] = useState<DeviceStatus>(SKELETON_STATUS);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setIsLoading(true);
-    let receivedData = false;
-
-    const timer = setTimeout(() => {
-      if (!receivedData) {
-        setIsLoading(false);
-      }
-    }, 3000);
-
     const handleUpdate = (newStatus: DeviceStatus) => {
-      receivedData = true;
       setStatus(newStatus);
-      setIsLoading(false);
       setError(null);
     };
 
     const handleError = (err: Error) => {
       setError(err.message);
-      setIsLoading(false);
     };
 
     const unsubRtdb = subscribeToDeviceStatus(handleUpdate, handleError, deviceId);
-
-    // Primary Realtime Database path: /intelliwatt
-    const unsubIntelliWatt = subscribeToIntelliWatt((data) => {
-      if (data) {
-        receivedData = true;
-        setWifiStatus(data.wifiStatus ?? null);
-        setDeviceStatus(data.deviceStatus ?? null);
-
-        const isOnlineVal = (val: unknown) => {
-          if (typeof val === 'boolean') return val;
-          if (typeof val === 'string') return ['online', 'connected', 'true', 'active', 'ok', 'ready', 'nominal', '1'].includes(val.toLowerCase().trim());
-          if (typeof val === 'number') return val === 1;
-          return false;
-        };
-
-        setStatus(prev => {
-          const isDeviceOnline = data.deviceStatus !== undefined && data.deviceStatus !== null
-            ? isOnlineVal(data.deviceStatus)
-            : (data.wifiStatus !== undefined && data.wifiStatus !== null ? isOnlineVal(data.wifiStatus) : prev.online);
-
-          return {
-            ...prev,
-            online: isDeviceOnline,
-            firmware: data.deviceStatus ? String(data.deviceStatus) : prev.firmware,
-          };
-        });
-        setIsLoading(false);
-        setError(null);
-      }
-    });
-
-    const handleManualRefreshStatus = (e: Event) => {
-      const customEvent = e as CustomEvent<{ data?: { wifiStatus?: unknown; deviceStatus?: unknown } }>;
-      const data = customEvent.detail?.data;
-      if (data) {
-        setWifiStatus(data.wifiStatus as any ?? null);
-        setDeviceStatus(data.deviceStatus as any ?? null);
-        setStatus(prev => {
-          const devOnline = Boolean(
-            data.deviceStatus
-              ? ['active', 'online', 'nominal', 'ready'].includes(String(data.deviceStatus).toLowerCase())
-              : data.wifiStatus
-          );
-          return {
-            ...prev,
-            online: devOnline,
-          };
-        });
-      }
-    };
-    if (typeof window !== 'undefined') {
-      window.addEventListener('intelliwatt:refresh-data', handleManualRefreshStatus);
-    }
-
     return () => {
-      clearTimeout(timer);
       unsubRtdb();
-      unsubIntelliWatt();
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('intelliwatt:refresh-data', handleManualRefreshStatus);
-      }
     };
   }, [deviceId]);
 
-  const isOnlineVal = (val: unknown) => {
-    if (typeof val === 'boolean') return val;
-    if (typeof val === 'string') return ['online', 'connected', 'true', 'active', 'ok', 'ready', 'nominal', '1'].includes(val.toLowerCase().trim());
-    if (typeof val === 'number') return val === 1;
-    return false;
-  };
-
-  const isWifiOnline = wifiStatus !== undefined && wifiStatus !== null
-    ? isOnlineVal(wifiStatus)
-    : status.online;
-
   return {
     status,
-    isLoading,
+    isLoading: heartbeat.isLoading,
     error,
-    wifiStatus,
-    deviceStatus,
-    isWifiOnline,
+    wifiStatus: heartbeat.wifiOnline,
+    deviceStatus: heartbeat.prototypeOnline ? 'Active' : 'Offline',
+    isWifiOnline: heartbeat.wifiOnline,
+    hasHeartbeat: heartbeat.hasHeartbeat,
+    prototypeOnline: heartbeat.prototypeOnline,
+    wifiOnline: heartbeat.wifiOnline,
+    firebaseOnline: heartbeat.firebaseOnline,
     // Direct property spreading ensures backward compatibility with `const status = useDeviceStatus()`
-    online:   status.online,
-    rssi:     status.rssi,
-    ip:       status.ip,
-    firmware: status.firmware,
-    uptime:   status.uptime,
-    lastSeen: status.lastSeen,
+    online:   heartbeat.prototypeOnline,
+    rssi:     heartbeat.hasHeartbeat ? status.rssi : -100,
+    ip:       heartbeat.hasHeartbeat ? status.ip : '—',
+    firmware: heartbeat.hasHeartbeat ? status.firmware : '—',
+    uptime:   heartbeat.hasHeartbeat ? status.uptime : 0,
+    lastSeen: heartbeat.lastSeen ?? status.lastSeen,
   };
 }
 

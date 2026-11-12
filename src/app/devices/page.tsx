@@ -35,9 +35,9 @@ const DEVICES = [
     bg:       'rgba(255,255,255,0.08)',
   },
   {
-    id:       'oled-128x64',
-    name:     'OLED Display',
-    model:    'SSD1306 128×64',
+    id:       'lcd-screen',
+    name:     'LCD Screen',
+    model:    '16×2 I2C Display',
     location: 'Front Panel',
     icon:     '📟',
     color:    '#8A6A16',
@@ -78,10 +78,10 @@ export default function DevicesPage() {
       {/* Network Overview */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.35rem', marginBottom: '2.25rem' }}>
         {[
-          { label: 'Online Devices', val: 3, suffix: ' of 4', sub: 'of 4 registered' },
-          { label: 'Network',        display: status.ip.split('.').slice(0,3).join('.') + '.x', sub: 'Subnet' },
-          { label: 'WiFi Signal',    val: status.rssi, suffix: ' dBm', sub: 'RSSI Strength' },
-          { label: 'System Uptime',  display: formatUptime(status.uptime), sub: 'Since last boot' },
+          { label: 'Online Devices', val: status.hasHeartbeat ? 4 : 0, suffix: ' of 4', sub: 'of 4 registered' },
+          { label: 'Network',        display: status.hasHeartbeat && status.ip && status.ip !== '—' ? status.ip.split('.').slice(0,3).join('.') + '.x' : '—', sub: 'Subnet' },
+          { label: 'WiFi Signal',    val: status.hasHeartbeat ? status.rssi : 0, suffix: ' dBm', sub: 'RSSI Strength' },
+          { label: 'System Uptime',  display: status.hasHeartbeat ? formatUptime(status.uptime) : 'Offline', sub: 'Since last boot' },
         ].map((kpi, i) => (
           <article key={kpi.label} className={`glass-card animate-fade-up stagger-${i+1}`} style={{ padding: '1.5rem' }}>
             <div className="metric-label">{kpi.label}</div>
@@ -100,7 +100,7 @@ export default function DevicesPage() {
       {/* Device Cards */}
       <div className="device-grid" style={{ marginBottom: '2.5rem' }}>
         {DEVICES.map((device, i) => {
-          const isOnline = device.id === 'oled-128x64' ? false : true;
+          const isOnline = status.hasHeartbeat;
           const isSelected = selected === device.id;
           return (
             <article
@@ -202,31 +202,34 @@ export default function DevicesPage() {
             </tr>
           </thead>
           <tbody>
-            {DEVICES.map(d => (
-              <tr key={d.id}>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: '1.25rem' }}>{d.icon}</span>
-                    <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{d.name}</span>
-                  </div>
-                </td>
-                <td style={{ fontFamily: 'Manrope, sans-serif', fontSize: '0.82rem' }}>{d.model}</td>
-                <td style={{ fontFamily: 'Manrope, sans-serif', color: 'var(--gold-bright)', fontSize: '0.85rem' }}>
-                  {d.id === 'oled-128x64' ? '—' : status.ip}
-                </td>
-                <td style={{ fontFamily: 'Manrope, sans-serif', color: 'var(--accent-green)', fontSize: '0.82rem' }}>
-                  {d.id === 'oled-128x64' ? '—' : status.firmware}
-                </td>
-                <td style={{ fontFamily: 'Manrope, sans-serif', fontSize: '0.82rem' }}>
-                  {d.id === 'oled-128x64' ? '—' : formatUptime(status.uptime)}
-                </td>
-                <td>
-                  <span className={`badge ${d.id === 'oled-128x64' ? 'badge-red' : 'badge-green'}`}>
-                    {d.id === 'oled-128x64' ? 'Offline' : 'Online'}
-                  </span>
-                </td>
-              </tr>
-            ))}
+            {DEVICES.map(d => {
+              const isOnline = status.hasHeartbeat;
+              return (
+                <tr key={d.id}>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: '1.25rem' }}>{d.icon}</span>
+                      <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{d.name}</span>
+                    </div>
+                  </td>
+                  <td style={{ fontFamily: 'Manrope, sans-serif', fontSize: '0.82rem' }}>{d.model}</td>
+                  <td style={{ fontFamily: 'Manrope, sans-serif', color: isOnline ? 'var(--gold-bright)' : 'var(--text-muted)', fontSize: '0.85rem' }}>
+                    {isOnline ? status.ip : '—'}
+                  </td>
+                  <td style={{ fontFamily: 'Manrope, sans-serif', color: isOnline ? 'var(--accent-green)' : 'var(--text-muted)', fontSize: '0.82rem' }}>
+                    {isOnline ? status.firmware : '—'}
+                  </td>
+                  <td style={{ fontFamily: 'Manrope, sans-serif', color: isOnline ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: '0.82rem' }}>
+                    {isOnline ? formatUptime(status.uptime) : '—'}
+                  </td>
+                  <td>
+                    <span className={`badge ${isOnline ? 'badge-green' : 'badge-red'}`}>
+                      {isOnline ? 'Online' : 'Offline'}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

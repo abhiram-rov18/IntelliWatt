@@ -17,12 +17,11 @@ import {
 } from '@/components/charts/Charts';
 import {
   subscribeToIntelliWatt,
-  subscribeToConnectionState,
   type IntelliWattData,
 } from '@/lib/realtimeDb';
 import type { SensorReading } from '@/lib/firebase';
 import { isFirebaseConfigured } from '@/lib/firebase';
-import { useFirebaseConnection } from '@/lib/hooks';
+import { useSystemHeartbeat } from '@/lib/hooks';
 import { generateSmartEnergyReport } from '@/lib/generatePdfReport';
 import SmartInsightsCard from '@/components/cards/SmartInsightsCard';
 
@@ -194,10 +193,8 @@ function IndustrialWaveform() {
 export default function DashboardPage() {
   const [docData, setDocData]                 = useState<IntelliWattData | null>(null);
   const [isLoading, setIsLoading]             = useState<boolean>(true);
-  const [isRtdbConnected, setIsRtdbConnected] = useState<boolean | null>(null);
   const [history, setHistory]                 = useState<SensorReading[]>([]);
   const [lastUpdated, setLastUpdated]         = useState<string>('Live Sync');
-  const isFirebaseConnected                   = useFirebaseConnection();
 
   // Real-time listener on path IntelliWatt in Firebase Realtime Database
   useEffect(() => {
@@ -219,7 +216,6 @@ export default function DashboardPage() {
         console.log("Relay2:", data?.relay2);
         console.log("========================================");
 
-        setIsRtdbConnected(true);
         setDocData(data);
         setIsLoading(false);
         const timeStr = data.time || new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
@@ -249,19 +245,12 @@ export default function DashboardPage() {
       },
       (err) => {
         console.warn('[Dashboard] Realtime Database listener error:', err.message);
-        setIsRtdbConnected(false);
         setIsLoading(false);
       }
     );
 
-    // Sentinel to detect connection/disconnection and auto-reconnect
-    const unsubConn = subscribeToConnectionState((connected) => {
-      setIsRtdbConnected(connected);
-    });
-
     return () => {
       unsub();
-      unsubConn();
     };
   }, []);
 
@@ -272,7 +261,6 @@ export default function DashboardPage() {
       const data = customEvent.detail?.data;
       if (!data) return;
 
-      setIsRtdbConnected(true);
       setDocData(data);
       setIsLoading(false);
 
@@ -316,27 +304,17 @@ export default function DashboardPage() {
     return isNaN(n) ? '--' : n;
   };
 
-  const isOnlineVal = (val: unknown): boolean => {
-    if (typeof val === 'boolean') return val;
-    if (typeof val === 'string') return ['online', 'connected', 'true', 'active', 'ok', 'ready'].includes(val.toLowerCase().trim());
-    if (typeof val === 'number') return val === 1;
-    return false;
-  };
 
-  const isDeviceOnline = docData?.deviceStatus !== undefined && docData?.deviceStatus !== null
-    ? isOnlineVal(docData.deviceStatus)
-    : false;
+  const heartbeat = useSystemHeartbeat();
+  const { hasHeartbeat, prototypeOnline, wifiOnline, firebaseOnline } = heartbeat;
 
-  const isWifiOnline = docData?.wifiStatus !== undefined && docData?.wifiStatus !== null
-    ? isOnlineVal(docData.wifiStatus)
-    : false;
+  const isDeviceOnline = prototypeOnline;
+  const isWifiOnline = wifiOnline;
+  const isOnline = prototypeOnline;
 
-  const isOnline = isDeviceOnline || isWifiOnline;
-
-  const isConnected = (isRtdbConnected ?? isFirebaseConnected) === true && docData !== null;
   const showOfflineBanner =
     !isFirebaseConfigured ||
-    (!isLoading && !isConnected);
+    (!isLoading && !hasHeartbeat);
 
   const bannerVariant =
     !isFirebaseConfigured
@@ -384,9 +362,9 @@ export default function DashboardPage() {
         powerFactor: typeof powerFactorNumeric === 'number' ? powerFactorNumeric : 0,
         energy: typeof energyNumeric === 'number' ? energyNumeric : 0,
         bill: typeof billNumeric === 'number' ? billNumeric : 0,
-        isOnline,
-        isWifiOnline,
-        dbConnected: (isRtdbConnected ?? isFirebaseConnected) === true,
+        isOnline: prototypeOnline,
+        isWifiOnline: wifiOnline,
+        dbConnected: firebaseOnline,
         relay1: docData?.relay1,
         relay2: docData?.relay2,
         relay3: docData?.relay3,
@@ -428,8 +406,8 @@ export default function DashboardPage() {
             time: '—',
             event: 'Realtime Database Sync',
             device: 'IntelliWatt',
-            value: isRtdbConnected ? 'Synchronized' : 'Offline',
-            status: isRtdbConnected ? 'Connected' : 'Offline',
+            value: firebaseOnline ? 'Synchronized' : 'Offline',
+            status: firebaseOnline ? 'Connected' : 'Offline',
           },
         ],
       });
@@ -462,19 +440,19 @@ export default function DashboardPage() {
               style={{
                 fontSize: '0.75rem',
                 padding: '6px 14px',
-                borderColor: isOnline ? 'var(--gold-border)' : 'rgba(231, 76, 60, 0.35)',
-                color: isOnline ? 'var(--gold-bright)' : 'var(--accent-red)',
+                borderColor: prototypeOnline ? 'var(--gold-border)' : 'rgba(231, 76, 60, 0.35)',
+                color: prototypeOnline ? 'var(--gold-bright)' : 'var(--accent-red)',
                 background: 'var(--bg-surface-secondary)',
               }}
             >
               <span
                 className="metric-live-dot"
                 style={{
-                  background: isOnline ? 'var(--accent-green)' : 'var(--accent-red)',
-                  boxShadow: isOnline ? '0 0 8px rgba(46,204,113,0.8)' : '0 0 8px rgba(231,76,60,0.8)',
+                  background: prototypeOnline ? 'var(--accent-green)' : 'var(--accent-red)',
+                  boxShadow: prototypeOnline ? '0 0 8px rgba(46,204,113,0.8)' : '0 0 8px rgba(231,76,60,0.8)',
                 }}
               />
-              {isLoading ? 'Connecting…' : (isOnline ? '🟢 Online' : '🔴 Offline')}
+              {isLoading && heartbeat.isLoading ? 'Connecting…' : (prototypeOnline ? '🟢 Prototype ON' : '🔴 Prototype OFF')}
             </div>
             <button
               id="generate-smart-energy-report-btn"
@@ -767,11 +745,11 @@ export default function DashboardPage() {
                 <span
                   className="card-live-dot"
                   style={{
-                    background: isWifiOnline ? 'var(--accent-green)' : 'var(--accent-red)',
-                    boxShadow: isWifiOnline ? '0 0 8px rgba(61, 220, 132, 0.8)' : '0 0 8px rgba(255, 82, 82, 0.8)',
+                    background: wifiOnline ? 'var(--accent-green)' : 'var(--accent-red)',
+                    boxShadow: wifiOnline ? '0 0 8px rgba(61, 220, 132, 0.8)' : '0 0 8px rgba(255, 82, 82, 0.8)',
                   }}
                 />
-                <span>{isWifiOnline ? 'ONLINE' : 'OFFLINE'}</span>
+                <span>{wifiOnline ? 'ON' : 'OFF'}</span>
               </div>
             </div>
             <div className="summary-card-center">
@@ -779,12 +757,10 @@ export default function DashboardPage() {
                 className="summary-large-val"
                 style={{
                   fontSize: '1.25rem',
-                  color: isWifiOnline ? 'var(--accent-green)' : 'var(--accent-red)',
+                  color: wifiOnline ? 'var(--accent-green)' : 'var(--accent-red)',
                 }}
               >
-                {docData?.wifiStatus !== undefined && docData?.wifiStatus !== null
-                  ? (isWifiOnline ? '2.4 GHz Connected' : 'Disconnected')
-                  : '--'}
+                {wifiOnline ? 'Wi-Fi ON' : 'Wi-Fi OFF'}
               </span>
             </div>
             <div className="summary-card-bottom">
@@ -805,11 +781,11 @@ export default function DashboardPage() {
                 <span
                   className="card-live-dot"
                   style={{
-                    background: isRtdbConnected ? 'var(--accent-green)' : 'var(--accent-red)',
-                    boxShadow: isRtdbConnected ? '0 0 8px rgba(61, 220, 132, 0.8)' : '0 0 8px rgba(255, 82, 82, 0.8)',
+                    background: firebaseOnline ? 'var(--accent-green)' : 'var(--accent-red)',
+                    boxShadow: firebaseOnline ? '0 0 8px rgba(61, 220, 132, 0.8)' : '0 0 8px rgba(255, 82, 82, 0.8)',
                   }}
                 />
-                <span>{isRtdbConnected ? 'SYNC' : 'HALT'}</span>
+                <span>{firebaseOnline ? 'CONNECTED' : 'OFF'}</span>
               </div>
             </div>
             <div className="summary-card-center">
@@ -817,10 +793,10 @@ export default function DashboardPage() {
                 className="summary-large-val"
                 style={{
                   fontSize: '1.25rem',
-                  color: isRtdbConnected ? 'var(--accent-green)' : 'var(--accent-red)',
+                  color: firebaseOnline ? 'var(--accent-green)' : 'var(--accent-red)',
                 }}
               >
-                {isRtdbConnected ? 'Realtime Database Active' : 'Offline'}
+                {firebaseOnline ? 'Firebase Connected' : 'Firebase OFF'}
               </span>
             </div>
             <div className="summary-card-bottom">
@@ -828,24 +804,24 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* 5. Device Status */}
+          {/* 5. Prototype Status */}
           <div className="summary-mini-card">
             <div className="summary-card-top">
               <div className="summary-card-top-left">
                 <div className="summary-mini-icon">
                   <Cpu size={15} color="var(--gold-bright)" />
                 </div>
-                <span className="summary-mini-name">Device Status</span>
+                <span className="summary-mini-name">Prototype Status</span>
               </div>
               <div className="compact-card-live-badge">
                 <span
                   className="card-live-dot"
                   style={{
-                    background: isDeviceOnline ? 'var(--accent-green)' : 'var(--accent-red)',
-                    boxShadow: isDeviceOnline ? '0 0 8px rgba(61, 220, 132, 0.8)' : '0 0 8px rgba(255, 82, 82, 0.8)',
+                    background: prototypeOnline ? 'var(--accent-green)' : 'var(--accent-red)',
+                    boxShadow: prototypeOnline ? '0 0 8px rgba(61, 220, 132, 0.8)' : '0 0 8px rgba(255, 82, 82, 0.8)',
                   }}
                 />
-                <span>{isDeviceOnline ? 'ACTIVE' : 'IDLE'}</span>
+                <span>{prototypeOnline ? 'ON' : 'OFF'}</span>
               </div>
             </div>
             <div className="summary-card-center">
@@ -853,12 +829,10 @@ export default function DashboardPage() {
                 className="summary-large-val"
                 style={{
                   fontSize: '1.25rem',
-                  color: isDeviceOnline ? 'var(--accent-green)' : 'var(--accent-red)',
+                  color: prototypeOnline ? 'var(--accent-green)' : 'var(--accent-red)',
                 }}
               >
-                {docData?.deviceStatus !== undefined && docData?.deviceStatus !== null
-                  ? (isDeviceOnline ? 'ESP32 Nominal' : 'Standby')
-                  : '--'}
+                {prototypeOnline ? 'Prototype ON' : 'Prototype OFF'}
               </span>
             </div>
             <div className="summary-card-bottom">
@@ -934,9 +908,9 @@ export default function DashboardPage() {
         energy={energyNumeric}
         frequency={frequencyNumeric}
         powerFactor={powerFactorNumeric}
-        isOnline={isOnline}
-        isWifiOnline={isWifiOnline}
-        dbConnected={(isRtdbConnected ?? isFirebaseConnected) === true}
+        isOnline={prototypeOnline}
+        isWifiOnline={wifiOnline}
+        dbConnected={firebaseOnline}
         lastUpdated={lastUpdated}
       />
 
@@ -1019,19 +993,22 @@ export default function DashboardPage() {
                   time: '—',
                   event: 'WiFi Status',
                   device: 'intelliwatt',
-                  value: docData?.wifiStatus !== undefined && docData?.wifiStatus !== null
-                    ? (isWifiOnline ? '🟢 Online' : '🔴 Offline')
-                    : '--',
-                  status: isWifiOnline ? 'success' : 'warning',
+                  value: wifiOnline ? '🟢 Wi-Fi ON' : '🔴 Wi-Fi OFF',
+                  status: wifiOnline ? 'success' : 'danger',
                 },
                 {
                   time: '—',
-                  event: 'Device Status',
+                  event: 'Firebase Status',
                   device: 'intelliwatt',
-                  value: docData?.deviceStatus !== undefined && docData?.deviceStatus !== null
-                    ? (isDeviceOnline ? '🟢 Online' : '🔴 Offline')
-                    : '--',
-                  status: isDeviceOnline ? 'success' : 'danger',
+                  value: firebaseOnline ? '🟢 Connected' : '🔴 Disconnected',
+                  status: firebaseOnline ? 'success' : 'danger',
+                },
+                {
+                  time: '—',
+                  event: 'Prototype Status',
+                  device: 'intelliwatt',
+                  value: prototypeOnline ? '🟢 Prototype ON' : '🔴 Prototype OFF',
+                  status: prototypeOnline ? 'success' : 'danger',
                 },
               ].map((row, i) => (
                 <tr key={i}>
