@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <!-- Dark Vignette Circular Shield Background -->
+    <radialGradient id="favBg" cx="50%" cy="30%" r="70%">
+      <stop offset="0%" stopColor="#1C180C" />
+      <stop offset="70%" stopColor="#100E08" />
+      <stop offset="100%" stopColor="#050505" />
+    </radialGradient>
+
+    <!-- Outer Gold Ring Gradient -->
+    <linearGradient id="favRing" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stopColor="#F5D76E" stopOpacity="0.85" />
+      <stop offset="50%" stopColor="#D4AF37" stopOpacity="0.45" />
+      <stop offset="100%" stopColor="#9C7A16" stopOpacity="0.8" />
+    </linearGradient>
+
+    <!-- Primary Gold Lightning Bolt (Bright Highlights) -->
+    <linearGradient id="favBoltBright" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stopColor="#FFF4C4" />
+      <stop offset="35%" stopColor="#F5D76E" />
+      <stop offset="75%" stopColor="#D4AF37" />
+      <stop offset="100%" stopColor="#B38F22" />
+    </linearGradient>
+
+    <!-- Secondary Gold Lightning Bolt (Chiseled Depth) -->
+    <linearGradient id="favBoltDark" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stopColor="#D4AF37" />
+      <stop offset="40%" stopColor="#B89426" />
+      <stop offset="85%" stopColor="#7A5D12" />
+      <stop offset="100%" stopColor="#553F09" />
+    </linearGradient>
+
+    <!-- Specular Highlight Ridge -->
+    <linearGradient id="favSpecular" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.95" />
+      <stop offset="60%" stopColor="#FFF2B2" stopOpacity="0.5" />
+      <stop offset="100%" stopColor="#D4AF37" stopOpacity="0" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background Rect for iOS Apple Touch Icon corners -->
+  <rect width="100" height="100" fill="#050505" rx="22" />
+
+  <!-- Circular Badge with Gold Stroke -->
+  <circle cx="50" cy="50" r="44" fill="url(#favBg)" stroke="url(#favRing)" stroke-width="2.5" />
+
+  <!-- Inner Precision Hexagon Border -->
+  <polygon points="50,13 81.8,31.4 81.8,68.6 50,87 18.2,68.6 18.2,31.4" fill="none" stroke="rgba(212, 175, 55, 0.28)" stroke-width="1.2" />
+
+  <!-- Multi-Faceted Gold Lightning Bolt -->
+  <!-- Left / Upper Bright Facet -->
+  <path d="M52 16 L29 52 L47 52 L42 84 L73 45 L54 45 Z" fill="url(#favBoltBright)" />
+
+  <!-- Right Chiseled Depth Facet -->
+  <path d="M52 16 L50 45 L47 52 L54 45 L73 45 L58 64 L42 84 L45 57 Z" fill="url(#favBoltDark)" opacity="0.88" />
+
+  <!-- Specular Ridge Line -->
+  <path d="M52 17 L47 51 L53 46 L42 82" stroke="url(#favSpecular)" stroke-width="1.3" stroke-linecap="round" />
+
+  <!-- Golden Point Focus Dot -->
+  <circle cx="50" cy="50" r="1.5" fill="#FFF2B2" opacity="0.9" />
+</svg>
